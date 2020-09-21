@@ -5,8 +5,25 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
-
+int launch(char **args) {
+    pid_t parent = getpid();
+    pid_t pid = fork();
+    if (pid == -1) {
+        return -1;
+    }
+    else if (pid > 0) {
+// We are in parent process
+        int status;
+        waitpid(pid, &status, 0);
+    } else {
+        char *env[] = { "HOME=/usr/home", "LOGNAME=home", (char *)0 };
+        execve(args[0], args, env);
+        _exit(EXIT_FAILURE);
+    }
+}
 
 int main(int argc, char **argv) {
 //    if (argc > 1 && std::string(argv[1]) == "-d") {
@@ -36,6 +53,20 @@ int main(int argc, char **argv) {
             std::cout<<x<<std::endl;
         }
 
+        std::vector<char*> argv;
+        for (const auto& arg : ret)
+            argv.push_back((char*)arg.data());
+        argv.push_back(nullptr);
+
+        char** args = &argv[0];
+
+
+        std::string first = ret.at(0);
+        char fch = first.at(0);
+
+        if (fch == '/') {
+            launch(args);
+        }
 
         free(buf);
     }
