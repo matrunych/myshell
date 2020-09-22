@@ -20,7 +20,8 @@ int launch(char **args) {
         waitpid(pid, &status, 0);
     } else {
         char *env[] = { "HOME=/usr/home", "LOGNAME=home", (char *)0 };
-        execve(args[0], args, env);
+//        execve(args[0], args, env);
+        execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
 }
@@ -28,6 +29,10 @@ int launch(char **args) {
 int main(int argc, char **argv) {
 //    if (argc > 1 && std::string(argv[1]) == "-d") {
 //        rl_bind_key('\t', rl_insert);
+//    }
+
+//    for (char **ep = environ; *ep != NULL; ep++) {
+//        puts(*ep);
 //    }
 
     char* buf;
@@ -41,7 +46,7 @@ int main(int argc, char **argv) {
             add_history(buf);
         }
 
-        printf("[%s]\n", buf);
+//        printf("[%s]\n", buf);
         std::istringstream ss (buf);
         std::vector<std::string> ret;
 
@@ -49,9 +54,9 @@ int main(int argc, char **argv) {
                   std::istream_iterator<std::string>(),
                   std::back_inserter(ret));
 
-        for(auto x: ret){
-            std::cout<<x<<std::endl;
-        }
+//        for(auto x: ret){
+//            std::cout<<x<<std::endl;
+//        }
 
         std::vector<char*> argv;
         for (const auto& arg : ret)
@@ -66,6 +71,26 @@ int main(int argc, char **argv) {
 
         if (fch == '/') {
             launch(args);
+        }
+
+        if (first == "ls") {
+            launch(args);
+        }
+
+        if (first == "mexport") {
+            std::string name_val = ret.at(1);
+            std::string name = name_val.substr(0, name_val.find('='));
+            std::string val = name_val.substr(name_val.find('=') + 1, name_val.size() - name_val.find('='));
+//            std::cout << name << " " << val <<std::endl;
+            setenv(name.c_str(), val.c_str(), 1);
+
+//            for (char **ep = environ; *ep != NULL; ep++) {
+//                puts(*ep);
+//            }
+        }
+
+        if (first == "mecho" && ret.at(1).at(0) == '$') {
+            std::cout << getenv(ret[1].substr(1, ret[1].size() - 1).c_str()) << std::endl;
         }
 
         free(buf);
