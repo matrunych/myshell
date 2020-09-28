@@ -10,7 +10,15 @@
 
 int error = 0;
 
-void mexport(std::vector<std::string> argv) {
+int end_with(std::string str, std::string substr) {
+    if (str.size() >= substr.size() &&
+        str.compare(str.size() - substr.size(), substr.size(), substr) == 0)
+        return 1;
+    else
+        return 0;
+}
+
+void mexport(std::vector <std::string> argv) {
     std::string name_val = argv.at(1);
 
     if (name_val.find('=') == std::string::npos) {
@@ -30,7 +38,7 @@ void mexport(std::vector<std::string> argv) {
 //            }
 }
 
-void mecho(std::vector<std::string> argv) {
+void mecho(std::vector <std::string> argv) {
     for (int i = 1; i < argv.size(); i++) {
         if (argv.at(i).at(0) == '$') {
             std::cout << getenv(argv[i].substr(1, argv[i].size() - 1).c_str()) << " ";
@@ -59,12 +67,11 @@ void mcd(std::vector<char *> argv, std::string &d) {
     d = boost::filesystem::current_path().string() + " $ ";
 }
 
-bool is_number(const std::string& s)
-{
+bool is_number(const std::string &s) {
     return !s.empty() && std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isdigit(c); }) == s.end();
 }
 
-void mexit(int argc, std::vector<std::string> argv) {
+void mexit(int argc, std::vector <std::string> argv) {
     if (argc == 1) {
         _exit(0);
     } else {
@@ -94,7 +101,44 @@ int launch(char **args) {
     return 1;
 }
 
+
+void execute_script(std::string file) {
+    std::ifstream script(file);
+    if (!script.is_open()) {
+        std::cout << "Cannot open file" << std::endl;
+        return;
+    }
+    std::string line;
+
+    while (std::getline(script, line)) {
+        std::vector <std::string> argv;
+        std::istringstream ss(line);
+        std::string word;
+        while (ss >> word) {
+//            std::cout << word<<std::endl;
+            if (word[0] == '#') {
+                break;
+            }
+            argv.push_back(word);
+        }
+
+        std::vector<char *> args;
+        for (const auto &arg : argv)
+            args.push_back((char *) arg.data());
+        args.push_back(nullptr);
+        char **argss = &args[0];
+
+        launch(argss);
+
+    }
+}
+
+
 int main(int argc, char **argv) {
+    auto p = getenv("PATH");
+    std::string path = p;
+    path += ":.";
+    setenv("PATH", path.c_str(), 1);
 //    if (argc > 1 && std::string(argv[1]) == "-d") {
 //        rl_bind_key('\t', rl_insert);
 //    }
@@ -103,6 +147,14 @@ int main(int argc, char **argv) {
 //        puts(*ep);
 //    }
 
+    if (argc == 2) {
+        execute_script(argv[1]);
+        return 0;
+    }
+    if (argc > 2) {
+        std::cout << "Invalid number of arguments" << std::endl;
+        return -1;
+    }
 
 
     char *buf;
@@ -124,7 +176,7 @@ int main(int argc, char **argv) {
 
 
         std::istringstream ss(new_buf);
-        std::vector<std::string> ret;
+        std::vector <std::string> ret;
 
         std::copy(std::istream_iterator<std::string>(ss),
                   std::istream_iterator<std::string>(),
@@ -141,7 +193,6 @@ int main(int argc, char **argv) {
         int argc = ret.size();
 
         std::string first = ret.at(0);
-        char fch = first.at(0);
 
         namespace po = boost::program_options;
 
@@ -154,74 +205,68 @@ int main(int argc, char **argv) {
                 options(visible).run(), vm);
         po::notify(vm);
 
-//        if (fch == '/') {
-//            launch(args);
-//        }
-//
-//        if (first == "ls") {
-//            launch(args);
-//        }
 
-        if (first == "mexport") {
+        if ((first.rfind("./", 0) == 0) && end_with(first, ".msh")) {
+            std::vector<char *> pr;
+            pr.push_back((char *) "myshell");
+
+            pr.push_back((char *) first.substr(2, first.length() - 2).c_str());
+
+            launch(&pr[0]);
+        }
+        else if ((first == ".") && end_with(ret.at(1), ".msh")) {
+            execute_script(ret.at(1));
+        }
+        else if (first == "mexport") {
             if (vm.count("help")) {
                 std::cout << "Create new environment variable (var_name=VAL).\n" << visible << std::endl;
             } else {
                 mexport(ret);
             }
         }
-
-        if (first == "mecho") {
+        else if (first == "mecho") {
             if (vm.count("help")) {
                 std::cout << "Print given variables (starting with $) or text into console.\n" << visible << std::endl;
             } else {
                 mecho(ret);
             }
         }
-
-        if (first == "merrno") {
+        else if (first == "merrno") {
             if (vm.count("help")) {
                 std::cout << "Print exit code of last command into console.\n" << visible << std::endl;
             } else {
                 merrno();
             }
         }
-
-        if (first == "mpwd"){
+        else if (first == "mpwd") {
             if (vm.count("help")) {
                 std::cout << "Print current path.\n" << visible << std::endl;
             } else {
                 mpwd();
             }
         }
-
-        if (first == "mcd"){
+        else if (first == "mcd") {
             if (vm.count("help")) {
                 std::cout << "Change working directory.\n" << visible << std::endl;
             } else {
                 mcd(argv, d);
             }
         }
-
-        if (first == "mexit") {
+        else if (first == "mexit") {
             if (vm.count("help")) {
                 std::cout << "Exit myshell with given exit code.\n" << visible << std::endl;
             } else {
                 mexit(argc, ret);
             }
         }
-
-        launch(args);
-
-
+        else {
+            launch(args);
+        }
 
         new_buf.clear();
 
     }
 
-
     return 0;
-
-
-    return EXIT_SUCCESS;
 
 }
