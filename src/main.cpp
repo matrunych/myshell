@@ -32,10 +32,6 @@ void mexport(std::vector <std::string> argv) {
     setenv(name.c_str(), val.c_str(), 1);
 
     error = 0;
-
-//            for (char **ep = environ; *ep != NULL; ep++) {
-//                puts(*ep);
-//            }
 }
 
 void mecho(std::vector <std::string> argv) {
@@ -83,18 +79,14 @@ void mexit(int argc, std::vector <std::string> argv) {
     }
 }
 
-int launch(char **args) {
-    pid_t parent = getpid();
+int fork_exec(char **args) {
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
     } else if (pid > 0) {
-// We are in parent process
         int status;
         waitpid(pid, &status, 0);
     } else {
-//        char *env[] = {"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin", "HOME=/usr/home", "LOGNAME=home", (char *) 0};
-//        execve(args[0], args, environ);
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -115,7 +107,6 @@ void execute_script(std::string file) {
         std::istringstream ss(line);
         std::string word;
         while (ss >> word) {
-//            std::cout << word<<std::endl;
             if (word[0] == '#') {
                 break;
             }
@@ -128,8 +119,7 @@ void execute_script(std::string file) {
         args.push_back(nullptr);
         char **argss = &args[0];
 
-        launch(argss);
-
+        fork_exec(argss);
     }
 }
 
@@ -139,13 +129,6 @@ int main(int argc, char **argv) {
     std::string path = p;
     path += ":.";
     setenv("PATH", path.c_str(), 1);
-//    if (argc > 1 && std::string(argv[1]) == "-d") {
-//        rl_bind_key('\t', rl_insert);
-//    }
-
-//    for (char **ep = environ; *ep != NULL; ep++) {
-//        puts(*ep);
-//    }
 
     if (argc == 2) {
         execute_script(argv[1]);
@@ -212,7 +195,7 @@ int main(int argc, char **argv) {
 
             pr.push_back((char *) first.substr(2, first.length() - 2).c_str());
 
-            launch(&pr[0]);
+            fork_exec(&pr[0]);
         }
         else if ((first == ".") && end_with(ret.at(1), ".msh")) {
             execute_script(ret.at(1));
@@ -260,13 +243,11 @@ int main(int argc, char **argv) {
             }
         }
         else {
-            launch(args);
+            fork_exec(args);
         }
 
         new_buf.clear();
-
     }
 
     return 0;
-
 }

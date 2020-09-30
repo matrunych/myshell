@@ -16,6 +16,7 @@ include(cmake/config.cmake)
 include_directories(inc)
 add_library(operations SHARED src/operations.cpp inc/operations/operations.hpp)
 add_executable(myshell src/main.cpp)
+add_executable(mycat src/mycat.cpp)
 target_link_libraries(myshell operations)
 target_link_libraries(myshell readline)
 
@@ -23,6 +24,7 @@ target_link_libraries(myshell readline)
 find_package(Boost 1.65.1 COMPONENTS program_options filesystem REQUIRED)
 include_directories(${Boost_INCLUDE_DIR})
 target_link_libraries(myshell Boost::program_options Boost::filesystem)
+target_link_libraries(mycat Boost::program_options)
 
 # Sanitizers configuration
 if (ENABLE_SANITIZERS)
