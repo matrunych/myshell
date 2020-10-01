@@ -1,7 +1,6 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
-#include "operations/operations.hpp"
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <string>
@@ -37,7 +36,11 @@ void mexport(std::vector <std::string> argv) {
 void mecho(std::vector <std::string> argv) {
     for (int i = 1; i < argv.size(); i++) {
         if (argv.at(i).at(0) == '$') {
-            std::cout << getenv(argv[i].substr(1, argv[i].size() - 1).c_str()) << " ";
+            char* env_var = getenv(argv[i].substr(1, argv[i].size() - 1).c_str());
+
+            if (env_var != nullptr) {
+                std::cout << env_var << " ";
+            }
         } else {
             std::cout << argv[i] << " ";
         }

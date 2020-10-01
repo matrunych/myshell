@@ -14,10 +14,8 @@ include(cmake/config.cmake)
 
 # Project source compilation
 include_directories(inc)
-add_library(operations SHARED src/operations.cpp inc/operations/operations.hpp)
 add_executable(myshell src/main.cpp)
 add_executable(mycat src/mycat.cpp)
-target_link_libraries(myshell operations)
 target_link_libraries(myshell readline)
 
 # Add external packages
@@ -34,7 +32,4 @@ if (ENABLE_SANITIZERS)
 #    set(SANITIZE_ADDRESS ON)
 #    set(SANITIZE_THREAD ON)
     find_package(Sanitizers)
-
-    # CMake targets to which apply sanitizers
-    add_sanitizers(operations myshell)
 endif ()
