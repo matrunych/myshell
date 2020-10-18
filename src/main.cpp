@@ -6,6 +6,7 @@
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 int error = 0;
 
@@ -17,7 +18,7 @@ int end_with(std::string str, std::string substr) {
         return 0;
 }
 
-void mexport(std::vector <std::string> argv) {
+void mexport(std::vector<std::string> argv) {
     std::string name_val = argv.at(1);
 
     if (name_val.find('=') == std::string::npos) {
@@ -33,10 +34,10 @@ void mexport(std::vector <std::string> argv) {
     error = 0;
 }
 
-void mecho(std::vector <std::string> argv) {
+void mecho(std::vector<std::string> argv) {
     for (int i = 1; i < argv.size(); i++) {
         if (argv.at(i).at(0) == '$') {
-            char* env_var = getenv(argv[i].substr(1, argv[i].size() - 1).c_str());
+            char *env_var = getenv(argv[i].substr(1, argv[i].size() - 1).c_str());
 
             if (env_var != nullptr) {
                 std::cout << env_var << " ";
@@ -70,7 +71,7 @@ bool is_number(const std::string &s) {
     return !s.empty() && std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isdigit(c); }) == s.end();
 }
 
-void mexit(int argc, std::vector <std::string> argv) {
+void mexit(int argc, std::vector<std::string> argv) {
     if (argc == 1) {
         _exit(0);
     } else {
@@ -90,6 +91,7 @@ int fork_exec(char **args) {
         int status;
         waitpid(pid, &status, 0);
     } else {
+
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -106,7 +108,7 @@ void execute_script(std::string file) {
     std::string line;
 
     while (std::getline(script, line)) {
-        std::vector <std::string> argv;
+        std::vector<std::string> argv;
         std::istringstream ss(line);
         std::string word;
         while (ss >> word) {
@@ -126,6 +128,32 @@ void execute_script(std::string file) {
     }
 }
 
+int redirect(std::vector<std::string> command, std::string file, int newfd){
+    std::vector<char *> argv;
+    for (const auto &arg : command)
+        argv.push_back((char *) arg.data());
+    argv.push_back(nullptr);
+    char **args = &argv[0];
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        return -1;
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+    } else {
+        int fd;
+        if(newfd == STDIN_FILENO){
+            fd = open(file.c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
+        } else{
+            fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+        }
+        dup2(fd, newfd);
+        execvp(args[0], args);
+        _exit(EXIT_FAILURE);
+    }
+    return 1;
+}
 
 int main(int argc, char **argv) {
     auto p = getenv("PATH");
@@ -162,7 +190,7 @@ int main(int argc, char **argv) {
 
 
         std::istringstream ss(new_buf);
-        std::vector <std::string> ret;
+        std::vector<std::string> ret;
 
         std::copy(std::istream_iterator<std::string>(ss),
                   std::istream_iterator<std::string>(),
@@ -192,6 +220,33 @@ int main(int argc, char **argv) {
         po::notify(vm);
 
 
+        for (int i = 0; i < argc; i++) {
+            if (ret[i] == ">") {
+                std::vector<std::string> command(&ret[0], &ret[i]);
+                redirect(command, ret[i + 1], STDOUT_FILENO);
+                return 1;
+
+//                if(ret[argc - 1] == "2>&1"){
+//                    fork_exec_redirect_error(command, ret[i + 1]);
+//                }
+            }
+            if (ret[i] == "<") {
+                std::vector<std::string> command(&ret[0], &ret[i]);
+                redirect(command, ret[i + 1], STDIN_FILENO);
+                return 1;
+            }
+            if (ret[i] == "2>") {
+                std::vector<std::string> command(&ret[0], &ret[i]);
+                redirect(command, ret[i + 1], STDERR_FILENO);
+                return 1;
+            }
+//            if(ret[i]  == "&>"){
+//                fork_exec_redirect_ouput_error()
+//            }
+
+        }
+
+
         if ((first.rfind("./", 0) == 0) && end_with(first, ".msh")) {
             std::vector<char *> pr;
             pr.push_back((char *) "myshell");
@@ -199,53 +254,45 @@ int main(int argc, char **argv) {
             pr.push_back((char *) first.substr(2, first.length() - 2).c_str());
 
             fork_exec(&pr[0]);
-        }
-        else if ((first == ".") && end_with(ret.at(1), ".msh")) {
+        } else if ((first == ".") && end_with(ret.at(1), ".msh")) {
             execute_script(ret.at(1));
-        }
-        else if (first == "mexport") {
+        } else if (first == "mexport") {
             if (vm.count("help")) {
                 std::cout << "Create new environment variable (var_name=VAL).\n" << visible << std::endl;
             } else {
                 mexport(ret);
             }
-        }
-        else if (first == "mecho") {
+        } else if (first == "mecho") {
             if (vm.count("help")) {
                 std::cout << "Print given variables (starting with $) or text into console.\n" << visible << std::endl;
             } else {
                 mecho(ret);
             }
-        }
-        else if (first == "merrno") {
+        } else if (first == "merrno") {
             if (vm.count("help")) {
                 std::cout << "Print exit code of last command into console.\n" << visible << std::endl;
             } else {
                 merrno();
             }
-        }
-        else if (first == "mpwd") {
+        } else if (first == "mpwd") {
             if (vm.count("help")) {
                 std::cout << "Print current path.\n" << visible << std::endl;
             } else {
                 mpwd();
             }
-        }
-        else if (first == "mcd") {
+        } else if (first == "mcd") {
             if (vm.count("help")) {
                 std::cout << "Change working directory.\n" << visible << std::endl;
             } else {
                 mcd(argv, d);
             }
-        }
-        else if (first == "mexit") {
+        } else if (first == "mexit") {
             if (vm.count("help")) {
                 std::cout << "Exit myshell with given exit code.\n" << visible << std::endl;
             } else {
                 mexit(argc, ret);
             }
-        }
-        else {
+        } else {
             fork_exec(args);
         }
 
