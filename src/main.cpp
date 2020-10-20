@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <algorithm>
 
 int error = 0;
 
@@ -83,15 +84,19 @@ void mexit(int argc, std::vector<std::string> argv) {
     }
 }
 
-int fork_exec(char **args) {
+int fork_exec(char **args, bool background) {
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
-    } else if (pid > 0) {
+    } else if (pid > 0 && !background) {
         int status;
         waitpid(pid, &status, 0);
     } else {
-
+        if (background) {
+            close(0);
+            close(1);
+            close(2);
+        }
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -124,11 +129,12 @@ void execute_script(std::string file) {
         args.push_back(nullptr);
         char **argss = &args[0];
 
-        fork_exec(argss);
+        fork_exec(argss, false);
     }
+
 }
 
-int redirect(std::vector<std::string> command, std::string file, int newfd){
+int redirect(std::vector<std::string> command, std::string file, int newfd, bool background) {
     std::vector<char *> argv;
     for (const auto &arg : command)
         argv.push_back((char *) arg.data());
@@ -138,17 +144,50 @@ int redirect(std::vector<std::string> command, std::string file, int newfd){
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
-    } else if (pid > 0) {
+    } else if (pid > 0 && !background) {
         int status;
         waitpid(pid, &status, 0);
     } else {
+        if (background) {
+            close(0);
+            close(1);
+            close(2);
+        }
         int fd;
-        if(newfd == STDIN_FILENO){
+        if (newfd == STDIN_FILENO) {
             fd = open(file.c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
-        } else{
+        } else {
             fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
         }
         dup2(fd, newfd);
+        execvp(args[0], args);
+        _exit(EXIT_FAILURE);
+    }
+    return 1;
+}
+
+int redirect_out_err(std::vector<std::string> command, std::string file, bool background) {
+    std::vector<char *> argv;
+    for (const auto &arg : command)
+        argv.push_back((char *) arg.data());
+    argv.push_back(nullptr);
+    char **args = &argv[0];
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        return -1;
+    } else if (pid > 0 && !background) {
+        int status;
+        waitpid(pid, &status, 0);
+    } else {
+        if (background) {
+            close(0);
+            close(1);
+            close(2);
+        }
+        int fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -160,6 +199,9 @@ int main(int argc, char **argv) {
     std::string path = p;
     path += ":.";
     setenv("PATH", path.c_str(), 1);
+
+    bool redirected;
+    bool background;
 
     if (argc == 2) {
         execute_script(argv[1]);
@@ -220,40 +262,13 @@ int main(int argc, char **argv) {
         po::notify(vm);
 
 
-        for (int i = 0; i < argc; i++) {
-            if (ret[i] == ">") {
-                std::vector<std::string> command(&ret[0], &ret[i]);
-                redirect(command, ret[i + 1], STDOUT_FILENO);
-                return 1;
-
-//                if(ret[argc - 1] == "2>&1"){
-//                    fork_exec_redirect_error(command, ret[i + 1]);
-//                }
-            }
-            if (ret[i] == "<") {
-                std::vector<std::string> command(&ret[0], &ret[i]);
-                redirect(command, ret[i + 1], STDIN_FILENO);
-                return 1;
-            }
-            if (ret[i] == "2>") {
-                std::vector<std::string> command(&ret[0], &ret[i]);
-                redirect(command, ret[i + 1], STDERR_FILENO);
-                return 1;
-            }
-//            if(ret[i]  == "&>"){
-//                fork_exec_redirect_ouput_error()
-//            }
-
-        }
-
-
         if ((first.rfind("./", 0) == 0) && end_with(first, ".msh")) {
             std::vector<char *> pr;
             pr.push_back((char *) "myshell");
 
             pr.push_back((char *) first.substr(2, first.length() - 2).c_str());
 
-            fork_exec(&pr[0]);
+            fork_exec(&pr[0], false);
         } else if ((first == ".") && end_with(ret.at(1), ".msh")) {
             execute_script(ret.at(1));
         } else if (first == "mexport") {
@@ -293,7 +308,49 @@ int main(int argc, char **argv) {
                 mexit(argc, ret);
             }
         } else {
-            fork_exec(args);
+            redirected = false;
+            background = ret[argc - 1] == "&";
+            for (int i = 0; i < argc; i++) {
+                if (ret[i] == ">") {
+                    std::vector<std::string> command(&ret[0], &ret[i]);
+                    if (std::find(ret.begin(), ret.end(), "2>&1") != ret.end()) {
+                        redirected = true;
+
+                        redirect_out_err(command, ret[i + 1], background);
+                    } else {
+                        redirected = true;
+
+                        redirect(command, ret[i + 1], STDOUT_FILENO, background);
+                    }
+                    break;
+                }
+                if (ret[i] == "<") {
+                    redirected = true;
+
+                    std::vector<std::string> command(&ret[0], &ret[i]);
+                    redirect(command, ret[i + 1], STDIN_FILENO, background);
+                    break;
+                }
+                if (ret[i] == "2>") {
+                    redirected = true;
+
+                    std::vector<std::string> command(&ret[0], &ret[i]);
+                    redirect(command, ret[i + 1], STDERR_FILENO, background);
+                    break;
+                }
+                if (ret[i] == "&>") {
+                    redirected = true;
+
+                    std::vector<std::string> command(&ret[0], &ret[i]);
+                    redirect_out_err(command, ret[i + 1], background);
+                    break;
+                }
+
+            }
+
+            if (!redirected) {
+                fork_exec(args, background);
+            }
         }
 
         new_buf.clear();
