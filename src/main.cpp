@@ -88,9 +88,11 @@ int fork_exec(char **args, bool background) {
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
-    } else if (pid > 0 && !background) {
-        int status;
-        waitpid(pid, &status, 0);
+    } else if (pid > 0) {
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
     } else {
         if (background) {
             close(0);
@@ -144,9 +146,11 @@ int redirect(std::vector<std::string> command, std::string file, int newfd, bool
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
-    } else if (pid > 0 && !background) {
-        int status;
-        waitpid(pid, &status, 0);
+    } else if (pid > 0) {
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
     } else {
         if (background) {
             close(0);
@@ -176,9 +180,11 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
     pid_t pid = fork();
     if (pid == -1) {
         return -1;
-    } else if (pid > 0 && !background) {
-        int status;
-        waitpid(pid, &status, 0);
+    } else if (pid > 0) {
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
     } else {
         if (background) {
             close(0);
@@ -308,6 +314,19 @@ int main(int argc, char **argv) {
                 mexit(argc, ret);
             }
         } else {
+            std::vector<std::vector<std::string>> pipe_commands;
+            std::vector<std::string> cur_command;
+
+            for (auto el : ret) {
+                if (el != "|") {
+                    cur_command.push_back(el);
+                } else {
+                    pipe_commands.push_back(cur_command);
+                    cur_command.clear();
+                }
+            }
+            pipe_commands.push_back(cur_command);
+
             redirected = false;
             background = ret[argc - 1] == "&";
             for (int i = 0; i < argc; i++) {
