@@ -136,7 +136,8 @@ void execute_script(std::string file) {
 
 }
 
-int redirect(std::vector<std::string> command, std::string file, int newfd, bool background) {
+int redirect(std::vector<std::string> command, std::string file, int redirect_fd, bool background,
+             int input_fd = -1, int output_fd = -1) {
     std::vector<char *> argv;
     for (const auto &arg : command)
         argv.push_back((char *) arg.data());
@@ -157,13 +158,28 @@ int redirect(std::vector<std::string> command, std::string file, int newfd, bool
             close(1);
             close(2);
         }
+
         int fd;
-        if (newfd == STDIN_FILENO) {
-            fd = open(file.c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
+
+        if (redirect_fd != -1) {
+            if (redirect_fd == STDIN_FILENO) {
+                fd = open(file.c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
+                dup2(fd, STDIN_FILENO);
+                if (output_fd != -1) {
+                    dup2(output_fd, STDOUT_FILENO);
+                }
+            } else if (redirect_fd == STDOUT_FILENO) {
+                fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+                dup2(fd, STDOUT_FILENO);
+                if (input_fd != -1) {
+                    dup2(input_fd, STDIN_FILENO);
+                }
+            }
         } else {
-            fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+            dup2(input_fd, STDIN_FILENO);
+            dup2(output_fd, STDOUT_FILENO);
         }
-        dup2(fd, newfd);
+
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -198,6 +214,21 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
         _exit(EXIT_FAILURE);
     }
     return 1;
+}
+
+int pipeline(std::vector<std::vector<std::string>> coms) {
+    int pipefd[2]; // separate pipe for each command pair??????????
+    pipe(pipefd);
+
+    for (int i = 0; i < coms.size(); i++) {
+        if (i == 0) {
+            // check for < , if present run with redirection
+        } else if (i == coms.size() - 1) {
+            // check for > , if present run with redirection
+        } else {
+            // run with input output of pipe
+        }
+    }
 }
 
 int main(int argc, char **argv) {
@@ -327,48 +358,51 @@ int main(int argc, char **argv) {
             }
             pipe_commands.push_back(cur_command);
 
-            redirected = false;
-            background = ret[argc - 1] == "&";
-            for (int i = 0; i < argc; i++) {
-                if (ret[i] == ">") {
-                    std::vector<std::string> command(&ret[0], &ret[i]);
-                    if (std::find(ret.begin(), ret.end(), "2>&1") != ret.end()) {
-                        redirected = true;
+            if (pipe_commands.size() > 1) {
+//                pipeline(pipe_commands);
+            } else {
+                redirected = false;
+                background = ret[argc - 1] == "&";
+                for (int i = 0; i < argc; i++) {
+                    if (ret[i] == ">") {
+                        std::vector<std::string> command(&ret[0], &ret[i]);
+                        if (std::find(ret.begin(), ret.end(), "2>&1") != ret.end()) {
+                            redirected = true;
 
-                        redirect_out_err(command, ret[i + 1], background);
-                    } else {
-                        redirected = true;
+                            redirect_out_err(command, ret[i + 1], background);
+                        } else {
+                            redirected = true;
 
-                        redirect(command, ret[i + 1], STDOUT_FILENO, background);
+                            redirect(command, ret[i + 1], STDOUT_FILENO, background);
+                        }
+                        break;
                     }
-                    break;
+                    if (ret[i] == "<") {
+                        redirected = true;
+
+                        std::vector<std::string> command(&ret[0], &ret[i]);
+                        redirect(command, ret[i + 1], STDIN_FILENO, background);
+                        break;
+                    }
+                    if (ret[i] == "2>") {
+                        redirected = true;
+
+                        std::vector<std::string> command(&ret[0], &ret[i]);
+                        redirect(command, ret[i + 1], STDERR_FILENO, background);
+                        break;
+                    }
+                    if (ret[i] == "&>") {
+                        redirected = true;
+
+                        std::vector<std::string> command(&ret[0], &ret[i]);
+                        redirect_out_err(command, ret[i + 1], background);
+                        break;
+                    }
                 }
-                if (ret[i] == "<") {
-                    redirected = true;
 
-                    std::vector<std::string> command(&ret[0], &ret[i]);
-                    redirect(command, ret[i + 1], STDIN_FILENO, background);
-                    break;
+                if (!redirected) {
+                    fork_exec(args, background);
                 }
-                if (ret[i] == "2>") {
-                    redirected = true;
-
-                    std::vector<std::string> command(&ret[0], &ret[i]);
-                    redirect(command, ret[i + 1], STDERR_FILENO, background);
-                    break;
-                }
-                if (ret[i] == "&>") {
-                    redirected = true;
-
-                    std::vector<std::string> command(&ret[0], &ret[i]);
-                    redirect_out_err(command, ret[i + 1], background);
-                    break;
-                }
-
-            }
-
-            if (!redirected) {
-                fork_exec(args, background);
             }
         }
 
