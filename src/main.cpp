@@ -176,8 +176,13 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
                 }
             }
         } else {
-            dup2(input_fd, STDIN_FILENO);
-            dup2(output_fd, STDOUT_FILENO);
+            if (input_fd != -1) {
+                dup2(input_fd, STDIN_FILENO);
+
+            }
+            if (output_fd != -1) {
+                dup2(output_fd, STDOUT_FILENO);
+            }
         }
 
         execvp(args[0], args);
@@ -217,16 +222,53 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
 }
 
 int pipeline(std::vector<std::vector<std::string>> coms) {
-    int pipefd[2]; // separate pipe for each command pair??????????
-    pipe(pipefd);
+    std::vector<std::vector<int>> pipefd(coms.size() - 1, std::vector<int>(2));
+
+
+//    int pipefd[coms.size() - 1][2];
+    for (int i = 0; i < coms.size() - 1; i++) {
+        int arr[2];
+        pipe(arr);
+        pipefd[i][0] = arr[0];
+        pipefd[i][1] = arr[1];
+    }
 
     for (int i = 0; i < coms.size(); i++) {
         if (i == 0) {
-            // check for < , if present run with redirection
+            bool redirected = false;
+            for (int j = 0; j < coms[i].size(); j++) {
+                if (coms[i][j] == "<") {
+                    redirected = true;
+                    std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+                    redirect(command, coms[i][j + 1], STDIN_FILENO, false, -1, pipefd[i][1]);
+                    break;
+                }
+            }
+            if (!redirected) {
+                redirect(coms[i], "", -1, false, -1, pipefd[i][1]);
+                close(pipefd[i][1]);
+
+            }
         } else if (i == coms.size() - 1) {
-            // check for > , if present run with redirection
+            bool redirected = false;
+            for (int j = 0; j < coms[i].size(); j++) {
+                if (coms[i][j] == ">") {
+                    redirected = true;
+                    std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+                    redirect(command, coms[i][j + 1], STDOUT_FILENO, false, pipefd[i - 1][0], -1);
+                    break;
+                }
+            }
+            if (!redirected) {
+                redirect(coms[i], "", -1, false, pipefd[i - 1][0], -1);
+                close(pipefd[i - 1][0]);
+
+            }
         } else {
-            // run with input output of pipe
+            redirect(coms[i], "", -1, false, pipefd[i - 1][0], pipefd[i][1]);
+            close(pipefd[i - 1][0]);
+            close(pipefd[i][1]);
+
         }
     }
 }
@@ -359,7 +401,7 @@ int main(int argc, char **argv) {
             pipe_commands.push_back(cur_command);
 
             if (pipe_commands.size() > 1) {
-//                pipeline(pipe_commands);
+                pipeline(pipe_commands);
             } else {
                 redirected = false;
                 background = ret[argc - 1] == "&";
