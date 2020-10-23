@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <algorithm>
+#include <sys/ioctl.h>
 
 int error = 0;
 
@@ -17,22 +18,6 @@ int end_with(std::string str, std::string substr) {
         return 1;
     else
         return 0;
-}
-
-void mexport(std::vector<std::string> argv) {
-    std::string name_val = argv.at(1);
-
-    if (name_val.find('=') == std::string::npos) {
-        error = 1;
-        return;
-    }
-
-    std::string name = name_val.substr(0, name_val.find('='));
-    std::string val = name_val.substr(name_val.find('=') + 1, name_val.size() - name_val.find('='));
-
-    setenv(name.c_str(), val.c_str(), 1);
-
-    error = 0;
 }
 
 void mecho(std::vector<std::string> argv) {
@@ -168,9 +153,9 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
                 if (output_fd != -1) {
                     dup2(output_fd, STDOUT_FILENO);
                 }
-            } else if (redirect_fd == STDOUT_FILENO) {
+            } else if (redirect_fd == STDOUT_FILENO || redirect_fd == STDERR_FILENO) {
                 fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
-                dup2(fd, STDOUT_FILENO);
+                dup2(fd, redirect_fd);
                 if (input_fd != -1) {
                     dup2(input_fd, STDIN_FILENO);
                 }
@@ -178,7 +163,6 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
         } else {
             if (input_fd != -1) {
                 dup2(input_fd, STDIN_FILENO);
-
             }
             if (output_fd != -1) {
                 dup2(output_fd, STDOUT_FILENO);
@@ -191,7 +175,7 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
     return 1;
 }
 
-int redirect_out_err(std::vector<std::string> command, std::string file, bool background) {
+int redirect_out_err(std::vector<std::string> command, std::string file, bool background, int input_fd = -1) {
     std::vector<char *> argv;
     for (const auto &arg : command)
         argv.push_back((char *) arg.data());
@@ -205,6 +189,8 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
         if (!background) {
             int status;
             waitpid(pid, &status, 0);
+        } else {
+            signal(SIGCHLD, SIG_IGN);
         }
     } else {
         if (background) {
@@ -212,9 +198,16 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
             close(1);
             close(2);
         }
+
         int fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+
         dup2(fd, STDOUT_FILENO);
         dup2(fd, STDERR_FILENO);
+
+        if (input_fd != -1) {
+            dup2(input_fd, STDIN_FILENO);
+        }
+
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -224,14 +217,14 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
 int pipeline(std::vector<std::vector<std::string>> coms) {
     std::vector<std::vector<int>> pipefd(coms.size() - 1, std::vector<int>(2));
 
-
-//    int pipefd[coms.size() - 1][2];
     for (int i = 0; i < coms.size() - 1; i++) {
         int arr[2];
         pipe(arr);
         pipefd[i][0] = arr[0];
         pipefd[i][1] = arr[1];
     }
+
+    bool background = coms[coms.size() - 1][coms[coms.size() - 1].size() - 1] == "&";
 
     for (int i = 0; i < coms.size(); i++) {
         if (i == 0) {
@@ -240,14 +233,20 @@ int pipeline(std::vector<std::vector<std::string>> coms) {
                 if (coms[i][j] == "<") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
-                    redirect(command, coms[i][j + 1], STDIN_FILENO, false, -1, pipefd[i][1]);
+                    redirect(command, coms[i][j + 1], STDIN_FILENO, background, -1, pipefd[i][1]);
+                    close(pipefd[i][1]);
+                    break;
+                } else if (coms[i][j] == "2>") {
+                    redirected = true;
+                    std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+                    redirect(command, coms[i][j + 1], STDERR_FILENO, background, -1, pipefd[i][1]);
+                    close(pipefd[i][1]);
                     break;
                 }
             }
             if (!redirected) {
-                redirect(coms[i], "", -1, false, -1, pipefd[i][1]);
+                redirect(coms[i], "", -1, background, -1, pipefd[i][1]);
                 close(pipefd[i][1]);
-
             }
         } else if (i == coms.size() - 1) {
             bool redirected = false;
@@ -255,22 +254,78 @@ int pipeline(std::vector<std::vector<std::string>> coms) {
                 if (coms[i][j] == ">") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
-                    redirect(command, coms[i][j + 1], STDOUT_FILENO, false, pipefd[i - 1][0], -1);
+                    if (std::find(coms[i].begin(), coms[i].end(), "2>&1") != coms[i].end()) {
+                        redirect_out_err(command, coms[i][j + 1], background, pipefd[i - 1][0]);
+                    } else {
+                        redirect(command, coms[i][j + 1], STDOUT_FILENO, background, pipefd[i - 1][0], -1);
+                    }
+                    close(pipefd[i - 1][0]);
+                    break;
+                } else if (coms[i][j] == "2>") {
+                    redirected = true;
+                    std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+                    redirect(command, coms[i][j + 1], STDERR_FILENO, background, pipefd[i - 1][0], -1);
+                    close(pipefd[i - 1][0]);
+                    break;
+                } else if (coms[i][j] == "&>") {
+                    redirected = true;
+                    std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+                    redirect_out_err(command, coms[i][j + 1], background, pipefd[i - 1][0]);
+                    close(pipefd[i - 1][0]);
                     break;
                 }
             }
             if (!redirected) {
-                redirect(coms[i], "", -1, false, pipefd[i - 1][0], -1);
+                redirect(coms[i], "", -1, background, pipefd[i - 1][0], -1);
                 close(pipefd[i - 1][0]);
-
             }
         } else {
-            redirect(coms[i], "", -1, false, pipefd[i - 1][0], pipefd[i][1]);
+            redirect(coms[i], "", -1, background, pipefd[i - 1][0], pipefd[i][1]);
             close(pipefd[i - 1][0]);
             close(pipefd[i][1]);
-
         }
     }
+}
+
+void mexport(std::vector<std::string> argv) {
+    std::string name_val = argv.at(1);
+
+    if (name_val.find('=') == std::string::npos) {
+        error = 1;
+        return;
+    }
+
+    std::string name = name_val.substr(0, name_val.find('='));
+    std::string val = name_val.substr(name_val.find('=') + 1, name_val.size() - name_val.find('='));
+
+    if (val[0] == '$') {
+        int pipefd[2];
+        pipe(pipefd);
+
+        std::string com = val.substr(val.find('(') + 1, val.size() - 3);
+        std::vector<std::string> coms;
+        coms.push_back(com);
+
+        redirect(coms, "", -1, false, -1, pipefd[1]);
+        close(pipefd[1]);
+
+        char buf[1];
+        std::string output;
+
+        int size;
+        ioctl(pipefd[0], FIONREAD, &size);
+
+        for (int i = 0; i < size - 1; i++) {
+            read(pipefd[0], buf, 1);
+            output += buf[0];
+        }
+
+        setenv(name.c_str(), output.c_str(), 1);
+    } else {
+        setenv(name.c_str(), val.c_str(), 1);
+    }
+
+    error = 0;
 }
 
 int main(int argc, char **argv) {
