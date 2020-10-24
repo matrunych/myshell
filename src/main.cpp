@@ -77,13 +77,17 @@ int fork_exec(char **args, bool background) {
         if (!background) {
             int status;
             waitpid(pid, &status, 0);
+        } else {
+            signal(SIGCHLD, SIG_IGN);
         }
     } else {
+
         if (background) {
             close(0);
             close(1);
             close(2);
         }
+
         execvp(args[0], args);
         _exit(EXIT_FAILURE);
     }
@@ -136,8 +140,11 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
         if (!background) {
             int status;
             waitpid(pid, &status, 0);
+        } else {
+            signal(SIGCHLD, SIG_IGN);
         }
     } else {
+
         if (background) {
             close(0);
             close(1);
@@ -150,12 +157,14 @@ int redirect(std::vector<std::string> command, std::string file, int redirect_fd
             if (redirect_fd == STDIN_FILENO) {
                 fd = open(file.c_str(), O_RDONLY, S_IRUSR | S_IWUSR);
                 dup2(fd, STDIN_FILENO);
+
                 if (output_fd != -1) {
                     dup2(output_fd, STDOUT_FILENO);
                 }
             } else if (redirect_fd == STDOUT_FILENO || redirect_fd == STDERR_FILENO) {
                 fd = open(file.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
                 dup2(fd, redirect_fd);
+
                 if (input_fd != -1) {
                     dup2(input_fd, STDIN_FILENO);
                 }
@@ -193,6 +202,7 @@ int redirect_out_err(std::vector<std::string> command, std::string file, bool ba
             signal(SIGCHLD, SIG_IGN);
         }
     } else {
+
         if (background) {
             close(0);
             close(1);
@@ -233,52 +243,59 @@ int pipeline(std::vector<std::vector<std::string>> coms) {
                 if (coms[i][j] == "<") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+
                     redirect(command, coms[i][j + 1], STDIN_FILENO, background, -1, pipefd[i][1]);
-                    close(pipefd[i][1]);
                     break;
                 } else if (coms[i][j] == "2>") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+
                     redirect(command, coms[i][j + 1], STDERR_FILENO, background, -1, pipefd[i][1]);
-                    close(pipefd[i][1]);
                     break;
                 }
             }
+
             if (!redirected) {
                 redirect(coms[i], "", -1, background, -1, pipefd[i][1]);
-                close(pipefd[i][1]);
             }
+
+            close(pipefd[i][1]);
+
         } else if (i == coms.size() - 1) {
             bool redirected = false;
             for (int j = 0; j < coms[i].size(); j++) {
                 if (coms[i][j] == ">") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+
                     if (std::find(coms[i].begin(), coms[i].end(), "2>&1") != coms[i].end()) {
                         redirect_out_err(command, coms[i][j + 1], background, pipefd[i - 1][0]);
                     } else {
                         redirect(command, coms[i][j + 1], STDOUT_FILENO, background, pipefd[i - 1][0], -1);
                     }
-                    close(pipefd[i - 1][0]);
+
                     break;
                 } else if (coms[i][j] == "2>") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+
                     redirect(command, coms[i][j + 1], STDERR_FILENO, background, pipefd[i - 1][0], -1);
-                    close(pipefd[i - 1][0]);
                     break;
                 } else if (coms[i][j] == "&>") {
                     redirected = true;
                     std::vector<std::string> command(&coms[i][0], &coms[i][j]);
+
                     redirect_out_err(command, coms[i][j + 1], background, pipefd[i - 1][0]);
-                    close(pipefd[i - 1][0]);
                     break;
                 }
             }
+
             if (!redirected) {
                 redirect(coms[i], "", -1, background, pipefd[i - 1][0], -1);
-                close(pipefd[i - 1][0]);
             }
+
+            close(pipefd[i - 1][0]);
+
         } else {
             redirect(coms[i], "", -1, background, pipefd[i - 1][0], pipefd[i][1]);
             close(pipefd[i - 1][0]);
@@ -321,6 +338,7 @@ void mexport(std::vector<std::string> argv) {
         }
 
         setenv(name.c_str(), output.c_str(), 1);
+
     } else {
         setenv(name.c_str(), val.c_str(), 1);
     }
@@ -460,6 +478,7 @@ int main(int argc, char **argv) {
             } else {
                 redirected = false;
                 background = ret[argc - 1] == "&";
+
                 for (int i = 0; i < argc; i++) {
                     if (ret[i] == ">") {
                         std::vector<std::string> command(&ret[0], &ret[i]);
