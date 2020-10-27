@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <sys/ioctl.h>
+#include <netinet/in.h>
 
 int error = 0;
 
@@ -352,35 +353,89 @@ int main(int argc, char **argv) {
     path += ":.";
     setenv("PATH", path.c_str(), 1);
 
+    namespace po = boost::program_options;
+
+    int port;
+    po::options_description visible("Supported options");
+    visible.add_options()
+            ("help,h", "Print this help message.")
+            ("server", "Run myshell as remote server.")
+            ("port", po::value<int>(&port), "Set port.");
+
+    po::variables_map vm;
+    po::store(po::command_line_parser(argc, argv).options(visible).run(), vm);
+    po::notify(vm);
+
+    bool is_server = vm.count("server");
+
+    int psd;
+    if (is_server) {
+        struct sockaddr_in server;
+
+        int sd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sd == -1) {
+            exit(3);
+        }
+
+        memset(&server, 0, sizeof (server));
+        server.sin_family = AF_INET;
+        server.sin_addr.s_addr = htonl(INADDR_ANY);
+        server.sin_port = htons(port);
+
+        int res = bind(sd, reinterpret_cast<const sockaddr *>(&server), sizeof(server));
+        if (res == -1) {
+            std::cout << std::strerror(errno) << std::endl;
+            exit(4);
+        }
+
+        listen(sd, 1);
+        psd = accept(sd, nullptr, nullptr);
+        close(sd);
+
+        dup2(psd, STDOUT_FILENO);
+        dup2(psd, STDERR_FILENO);
+    }
+
     bool redirected;
     bool background;
 
-    if (argc == 2) {
+    if (argc == 2 && !is_server) {
         execute_script(argv[1]);
         return 0;
     }
-    if (argc > 2) {
-        std::cout << "Invalid number of arguments" << std::endl;
-        return -1;
-    }
-
 
     char *buf;
+    char buf_serv[1024];
     std::string new_buf = "";
     boost::filesystem::path full_path(boost::filesystem::current_path());
     std::string d = full_path.string() + " $ ";
 
-    while ((buf = readline(d.c_str())) != nullptr) {
-        if (strlen(buf) > 0) {
+    while (is_server || (buf = readline(d.c_str())) != nullptr) {
+        if (is_server) {
+            write(1, d.c_str(), d.size());
+            int cc = recv(psd, buf_serv, sizeof(buf_serv), 0);
+            if (cc == 0) exit(EXIT_SUCCESS);
+            buf_serv[cc-2] = '\0';
+        }
+
+        if (!is_server && strlen(buf) > 0) {
             add_history(buf);
         }
 
-        for (int i = 0; i < strlen(buf); i++) {
-            if (buf[i] != '#') {
-                new_buf += buf[i];
-            } else { break; }
+        if (!is_server) {
+            for (int i = 0; i < strlen(buf); i++) {
+                if (buf[i] != '#') {
+                    new_buf += buf[i];
+                } else { break; }
+            }
+            free(buf);
+        } else {
+            for (int i = 0; i < strlen(buf_serv); i++) {
+                if (buf_serv[i] != '#') {
+                    new_buf += buf_serv[i];
+                } else { break; }
+            }
         }
-        free(buf);
 
 
         std::istringstream ss(new_buf);
@@ -389,7 +444,6 @@ int main(int argc, char **argv) {
         std::copy(std::istream_iterator<std::string>(ss),
                   std::istream_iterator<std::string>(),
                   std::back_inserter(ret));
-
 
         std::vector<char *> argv;
         for (const auto &arg : ret)
