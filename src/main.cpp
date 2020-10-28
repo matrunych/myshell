@@ -388,12 +388,20 @@ int main(int argc, char **argv) {
             exit(4);
         }
 
-        listen(sd, 1);
-        psd = accept(sd, nullptr, nullptr);
-        close(sd);
-
-        dup2(psd, STDOUT_FILENO);
-        dup2(psd, STDERR_FILENO);
+        while (true) {
+            listen(sd, 1);
+            psd = accept(sd, nullptr, nullptr);
+            int pid = fork();
+            if (pid == -1) {
+                exit(5);
+            } else if (pid > 0) {
+                continue;
+            } else {
+                dup2(psd, STDOUT_FILENO);
+                dup2(psd, STDERR_FILENO);
+                break;
+            }
+        }
     }
 
     bool redirected;
