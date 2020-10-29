@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 int error = 0;
 
@@ -388,9 +389,20 @@ int main(int argc, char **argv) {
             exit(4);
         }
 
+        int log_fd = open("log.txt", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRUSR | S_IWUSR);
         while (true) {
+            struct sockaddr_in peer_addr;
+            socklen_t peer_addr_len;
+
             listen(sd, 1);
+//            psd = accept(sd, (sockaddr *)&peer_addr, &peer_addr_len);
             psd = accept(sd, nullptr, nullptr);
+
+            int gpn = getpeername(psd, (sockaddr *)&peer_addr, &peer_addr_len);
+
+            std::string con_ip = "Connected: " + static_cast<std::string>(inet_ntoa(peer_addr.sin_addr)) + "\n";
+            write(log_fd, con_ip.c_str(), con_ip.length());
+
             int pid = fork();
             if (pid == -1) {
                 exit(5);
