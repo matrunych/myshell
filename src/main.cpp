@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ctime>
 
 int error = 0;
 
@@ -370,6 +371,13 @@ int main(int argc, char **argv) {
     bool is_server = vm.count("server");
 
     int psd;
+    int log_fd;
+    std::string ip_addr;
+    time_t rawtime;
+    struct tm * timeinfo;
+    char time_buf[100];
+    std::string log_msg;
+
     if (is_server) {
         struct sockaddr_in server;
 
@@ -389,7 +397,8 @@ int main(int argc, char **argv) {
             exit(4);
         }
 
-        int log_fd = open("log.txt", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRUSR | S_IWUSR);
+        log_fd = open("log.txt", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRUSR | S_IWUSR);
+
         while (true) {
             struct sockaddr_in peer_addr;
             socklen_t peer_addr_len;
@@ -400,8 +409,14 @@ int main(int argc, char **argv) {
 
             int gpn = getpeername(psd, (sockaddr *)&peer_addr, &peer_addr_len);
 
-            std::string con_ip = "Connected: " + static_cast<std::string>(inet_ntoa(peer_addr.sin_addr)) + "\n";
-            write(log_fd, con_ip.c_str(), con_ip.length());
+            ip_addr = inet_ntoa(peer_addr.sin_addr);
+
+            time (&rawtime);
+            timeinfo = localtime(&rawtime);
+            strftime(time_buf, sizeof(time_buf), "%d-%m-%Y %H:%M:%S", timeinfo);
+
+            log_msg = static_cast<std::string>(time_buf) + "   Connected: " + ip_addr + "\n";
+            write(log_fd, log_msg.c_str(), log_msg.length());
 
             int pid = fork();
             if (pid == -1) {
@@ -595,6 +610,13 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
+        time (&rawtime);
+        timeinfo = localtime(&rawtime);
+        strftime(time_buf, sizeof(time_buf), "%d-%m-%Y %H:%M:%S", timeinfo);
+
+        log_msg = static_cast<std::string>(time_buf) + "   Executed:  " + ip_addr + "   " + new_buf + "\n";
+        write(log_fd, log_msg.c_str(), log_msg.length());
 
         new_buf.clear();
     }

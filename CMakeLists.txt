@@ -16,6 +16,8 @@ include(cmake/config.cmake)
 include_directories(inc)
 add_executable(myshell src/main.cpp)
 add_executable(mycat src/mycat.cpp)
+add_executable(myrls src/myrls.cpp)
+
 target_link_libraries(myshell readline)
 
 # Add external packages
